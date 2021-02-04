@@ -1,154 +1,85 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Net;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 
+// ReSharper disable IdentifierTypo
 namespace PacktDownload
 {
-    class Program
+    internal class Program
     {
-        private static ChromeDriver cd;
+        private const bool Headless = false;
 
-        static void Main(string[] args)
+        private static void Main()
         {
-            IWebDriver o = null;
-            Console.Write("Enter URL of Video: ");
-            var url = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(url)) return;
-            Console.Write("Enter Folder Name: ");
-            var folder = Console.ReadLine() ?? string.Empty;
-            if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
-            try
+            var dependencies = GetDependencies();
+            var helper = (WebDriverHelper) dependencies["WebDriverHelper"];
+            var doMenu = true;
+            while (doMenu)
             {
-                var chromeOptions = new ChromeOptions();
-                chromeOptions.AddArgument("--headless");
-                Console.WriteLine("Instantiating Chrome driver...");
-                cd = new ChromeDriver(chromeOptions);
-                o = cd;
-                Console.WriteLine("Navigating to video url...");
-                cd.Navigate().GoToUrl(url);
-                cd.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(10);
-                var loginBtn = FindByXPath("//a[@href='/login']");
-                loginBtn.Click();
-                var email = FindById("login-input-email");
-                SendKeys(email, "ghill@pearlgateonline.com");
-                var pwd = FindById("login-input-password");
-                SendKeys(pwd, "roXyaub1");
-                var submitLogin = FindByXPath("//div[@id='login-form']//button[@type='submit']");
-                Console.WriteLine("Clicking submit button...");
-                submitLogin.Click();
-                var menuToggle = FindById("menu-toggle");
-                Console.WriteLine("Clicking menu toggle...");
-                menuToggle.Click();
-                const string linksXpath = "//li[@class='sub-nav ng-scope']/a";
-                var links = FindAllByXPath(linksXpath).Select(c => c.GetAttribute("href")).ToArray();
-                var webClient = new WebClient();
-                var lockObject = new object();
-                webClient.DownloadProgressChanged += (obj, evt) =>
+                var choice = helper.PromptUser(@"
+1. Packt Downloader
+2. Udemy Downloader
+: ");
+                switch (choice)
                 {
-                    lock (lockObject)
-                    {
-                        Console.SetCursorPosition(0, 1);
-                        var pct = Math.Round((double)evt.BytesReceived / (double)evt.TotalBytesToReceive, 2) *
-                                  100;
-                        Console.Write($"{pct}% done...".PadRight(10));
-                    }
-                };
-                var i = 0;
-                foreach (var link in links)
-                {
-                    if (string.IsNullOrWhiteSpace(link)) continue;
-                    i++;
-                    try
-                    {
-                        cd.Navigate().GoToUrl(link);
-                        Thread.Sleep(1500);
-                        var title = FindByXPath("//h2[starts-with(@class,'title')]")
-                            .GetAttribute("innerText");
-                        while (string.IsNullOrWhiteSpace(title))
-                        {
-                            Thread.Sleep(2000);
-                            title = FindByXPath("//h2[starts-with(@class,'title')]")
-                                .GetAttribute("innerText");
-                        }
-
-                        var video = FindByXPath("//video[@id='video-content_html5_api']");
-                        var videoUrl = video.GetAttribute("src");
-                        var filename = $"{i.ToString().PadLeft(3, '0')} - {title}.mp4";
-                        filename = RemoveIllegalFilenameChars(filename);
-                        Console.Clear();
-                        Console.WriteLine($"Downloading {filename}...");
-                        filename = $"{folder}\\{filename}";
-                        if (File.Exists(filename)) continue;
-                        webClient.DownloadFileTaskAsync(videoUrl, filename).ConfigureAwait(true).GetAwaiter().GetResult();
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine(e.Message);
-                        continue;
-                    }
+                    case "1":
+                        var packDownloader = new PacktDownloader((ChromeDriver)dependencies["ChromeDriver"], 
+                            (WebDriverHelper)dependencies["WebDriverHelper"]);
+                        packDownloader.Process();
+                        break;
+                    case "2":
+                        var udemyDownloader = new UdemyDownloader((ChromeDriver)dependencies["ChromeDriver"],
+                            (WebDriverHelper)dependencies["WebDriverHelper"]);
+                        udemyDownloader.Process();
+                        Console.ReadLine();
+                        break;
+                    default:
+                        doMenu = false;
+                        break;
                 }
-
-                cd.Close();
-                cd.Dispose();
             }
-            catch(Exception e)
+
+            Dispose(dependencies);
+        }
+
+        private static void Dispose(Dictionary<string, object> dependencies)
+        {
+            dependencies.Values
+                .OfType<IDisposable>()
+                .ToList().ForEach(obj => obj.Dispose());
+        }
+
+        private static Dictionary<string, object> GetDependencies()
+        {
+            var dic = new Dictionary<string, object>();
+            
+            var chromeOptions = new ChromeOptions();
+            // ReSharper disable once HeuristicUnreachableCode
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalse
+#pragma warning disable 162
+            if (Headless)
             {
-                Console.WriteLine(e.Message);
-                System.Diagnostics.Debugger.Break();
+                chromeOptions.AddArgument("--headless");
             }
-            finally
+            else
             {
-                o?.Dispose();
-            }
-        }
-
-        private static void SendKeys(IWebElement element, string value)
-        {
-            Console.WriteLine($"Sending \"{value}\"");
-            element.SendKeys(value);
-        }
-
-        private static IWebElement FindByXPath(string xpath)
-        {
-            Console.WriteLine($"Finding element: {xpath}");
-            return cd.FindElementByXPath(xpath);
-        }
-
-        private static IEnumerable<IWebElement> FindAllByXPath(string xpath)
-        {
-            Console.WriteLine($"Finding elements: {xpath}");
-            return cd.FindElementsByXPath(xpath);
-        }
-
-        private static IWebElement FindById(string id)
-        {
-            Console.WriteLine($"Finding element id: {id}");
-            return cd.FindElementById(id);
-        }
-
-        private static string RemoveIllegalFilenameChars(string filename)
-        {
-            foreach (var c in @"`=[]\;',/~!@#$%^&*()+{}|:""<>?'")
-            {
-                filename = filename.Replace(c.ToString(), string.Empty);
+                chromeOptions.AddArgument("start-maximized");
             }
 
-            return filename;
-        }
+            chromeOptions.SetLoggingPreference(LogType.Browser, LogLevel.Off);
 
-        static void ShowLinks(IEnumerable<string> links)
-        {
-            foreach (var link in links)
-            {
-                Console.WriteLine(link);
-            }
+#pragma warning restore 162
+            Console.WriteLine("Instantiating Chrome driver...");
+            var webDriver = new ChromeDriver(chromeOptions);
+            dic.Add("ChromeDriver", webDriver);
+            webDriver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(10);
+
+            var webDriverHelper = new WebDriverHelper(webDriver);
+            dic.Add("WebDriverHelper", webDriverHelper);
+
+            return dic;
         }
     }
 }
